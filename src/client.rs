@@ -55,6 +55,16 @@ pub(crate) fn validate_str(value: &str) -> std::result::Result<String, char> {
     Ok(quote!(value))
 }
 
+pub(crate) fn validate_str2(synopsis: &'static str, arg_name: &'static str, value: &str) -> Result<String> {
+    validate_str(value).map_err(|c| {
+        Error::Validate(ValidateError {
+            command_synopsis: synopsis,
+            argument: arg_name,
+            offending_char: c,
+        })
+    })
+}
+
 /// Ensure the input doesn't contain a command-terminator (newline), but don't quote it like
 /// `validate_str`.
 /// This is helpful for things like the FETCH attributes, which,
@@ -354,8 +364,11 @@ impl<T: Read + Write> Client<T> {
         username: U,
         password: P,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
-        let u = ok_or_unauth_client_err!(validate_str(username.as_ref()).map_err(tmp_validate_error), self);
-        let p = ok_or_unauth_client_err!(validate_str(password.as_ref()).map_err(tmp_validate_error), self);
+        let synopsis = "LOGIN username password";
+        let u =
+            ok_or_unauth_client_err!(validate_str2(synopsis, "username", username.as_ref()), self);
+        let p =
+            ok_or_unauth_client_err!(validate_str2(synopsis, "password", password.as_ref()), self);
         ok_or_unauth_client_err!(
             self.run_command_and_check_ok(&format!("LOGIN {} {}", u, p)),
             self
@@ -513,8 +526,11 @@ impl<T: Read + Write> Session<T> {
     /// of the mailbox, including per-user state, will happen in a mailbox opened with `examine`;
     /// in particular, messagess cannot lose [`Flag::Recent`] in an examined mailbox.
     pub fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
-        self.run(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
-            .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
+        self.run(&format!(
+            "EXAMINE {}",
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+        ))
+        .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
     }
 
     /// Fetch retrieves data associated with a set of messages in the mailbox.
@@ -656,7 +672,10 @@ impl<T: Read + Write> Session<T> {
     /// See the description of the [`UID`
     /// command](https://tools.ietf.org/html/rfc3501#section-6.4.8) for more detail.
     pub fn create<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
-        self.run_command_and_check_ok(&format!("CREATE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
+        self.run_command_and_check_ok(&format!(
+            "CREATE {}",
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+        ))
     }
 
     /// The [`DELETE` command](https://tools.ietf.org/html/rfc3501#section-6.3.4) permanently
@@ -679,7 +698,10 @@ impl<T: Read + Write> Session<T> {
     /// See the description of the [`UID`
     /// command](https://tools.ietf.org/html/rfc3501#section-6.4.8) for more detail.
     pub fn delete<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
-        self.run_command_and_check_ok(&format!("DELETE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
+        self.run_command_and_check_ok(&format!(
+            "DELETE {}",
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+        ))
     }
 
     /// The [`RENAME` command](https://tools.ietf.org/html/rfc3501#section-6.3.5) changes the name
