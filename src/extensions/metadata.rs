@@ -30,10 +30,10 @@ impl CmdListItemFormat for Metadata {
     fn format_as_cmd_list_item(&self) -> String {
         format!(
             "{} {}",
-            validate_str(self.entry.as_str()).unwrap(),
+            tmp_validate_str(self.entry.as_str()).unwrap(),
             self.value
                 .as_ref()
-                .map(|v| validate_str(v.as_str()).unwrap())
+                .map(|v| tmp_validate_str(v.as_str()).unwrap())
                 .unwrap_or_else(|| "NIL".to_string())
         )
     }
@@ -170,7 +170,7 @@ impl<T: Read + Write> Session<T> {
     ) -> Result<(Vec<Metadata>, Option<u64>)> {
         let v: Vec<String> = entries
             .iter()
-            .map(|e| validate_str(e.as_ref()).unwrap())
+            .map(|e| tmp_validate_str(e.as_ref()).unwrap())
             .collect();
         let s = v.as_slice().join(" ");
         let mut command = format!("GETMETADATA (DEPTH {}", depth.depth_str());
@@ -183,7 +183,7 @@ impl<T: Read + Write> Session<T> {
             format!(
                 ") {} ({})",
                 mailbox
-                    .map(|mbox| validate_str(mbox).unwrap())
+                    .map(|mbox| tmp_validate_str(mbox).unwrap())
                     .unwrap_or_else(|| "\"\"".to_string()),
                 s
             )
@@ -238,7 +238,7 @@ impl<T: Read + Write> Session<T> {
             .map(|metadata| metadata.format_as_cmd_list_item())
             .collect();
         let s = v.as_slice().join(" ");
-        let command = format!("SETMETADATA {} ({})", validate_str(mbox.as_ref()).map_err(tmp_validate_error)?, s);
+        let command = format!("SETMETADATA {} ({})", tmp_validate_str(mbox.as_ref())?, s);
         self.run_command_and_check_ok(command)
     }
 }

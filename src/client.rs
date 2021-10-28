@@ -18,15 +18,6 @@ const INITIAL_TAG: u32 = 0;
 const CR: u8 = 0x0d;
 const LF: u8 = 0x0a;
 
-// TODO: remove
-pub(crate) fn tmp_validate_error(c: char) -> Error {
-    Error::Validate(ValidateError {
-        command_synopsis: "TODO",
-        argument: "TODO",
-        offending_char: c,
-    })
-}
-
 macro_rules! quote {
     ($x:expr) => {
         format!("\"{}\"", $x.replace(r"\", r"\\").replace("\"", "\\\""))
@@ -46,23 +37,23 @@ impl<E> OptionExt<E> for Option<E> {
     }
 }
 
+// TODO: remove
+pub(crate) fn tmp_validate_str(value: &str) -> Result<String> {
+    // validate_str("TODO", "TODO", value)
+    todo!()
+}
+
 /// Convert the input into what [the IMAP
 /// grammar](https://tools.ietf.org/html/rfc3501#section-9)
 /// calls "quoted", which is reachable from "string" et al.
 /// Also ensure it doesn't contain a colliding command-delimiter (newline).
-pub(crate) fn validate_str(value: &str) -> std::result::Result<String, char> {
-    validate_str_noquote(value)?;
+pub(crate) fn validate_str(
+    synopsis: &'static str,
+    arg_name: &'static str,
+    value: &str,
+) -> Result<String> {
+    validate_str_noquote(synopsis, arg_name, value)?;
     Ok(quote!(value))
-}
-
-pub(crate) fn validate_str2(synopsis: &'static str, arg_name: &'static str, value: &str) -> Result<String> {
-    validate_str(value).map_err(|c| {
-        Error::Validate(ValidateError {
-            command_synopsis: synopsis,
-            argument: arg_name,
-            offending_char: c,
-        })
-    })
 }
 
 /// Ensure the input doesn't contain a command-terminator (newline), but don't quote it like
@@ -80,13 +71,29 @@ pub(crate) fn validate_str2(synopsis: &'static str, arg_name: &'static str, valu
 /// >             "BODY.PEEK" section ["<" number "." nz-number ">"]
 ///
 /// Note the lack of reference to any of the string-like rules or the quote characters themselves.
-fn validate_str_noquote(value: &str) -> std::result::Result<&str, char> {
+fn validate_str_noquote<'a>(
+    synopsis: &'static str,
+    arg_name: &'static str,
+    value: &'a str,
+) -> Result<&'a str> {
     value
         .matches(|c| c == '\n' || c == '\r')
         .next()
         .and_then(|s| s.chars().next())
-        .err()?;
+        .err()
+        .map_err(|c| {
+            Error::Validate(ValidateError {
+                command_synopsis: synopsis.to_owned(),
+                argument: arg_name,
+                offending_char: c,
+            })
+        })?;
     Ok(value)
+}
+
+// TODO: remove
+fn tmp_validate_str_noquote(value: &str) -> Result<&str> {
+    todo!()
 }
 
 /// This ensures the input doesn't contain a command-terminator or any other whitespace
@@ -102,13 +109,25 @@ fn validate_str_noquote(value: &str) -> std::result::Result<&str, char> {
 ///
 /// Note the lack of reference to SP or any other such whitespace terminals.
 /// Per this grammar, in theory we ought to be even more restrictive than "no whitespace".
-fn validate_sequence_set(value: &str) -> std::result::Result<&str, char> {
+fn validate_sequence_set<'a>(synopsis: &'static str, arg_name: &'static str, value: &'a str) -> Result<&'a str> {
     value
         .matches(|c: char| c.is_ascii_whitespace())
         .next()
         .and_then(|s| s.chars().next())
-        .err()?;
+        .err()
+        .map_err(|c| {
+            Error::Validate(ValidateError {
+                command_synopsis: synopsis.to_owned(),
+                argument: arg_name,
+                offending_char: c,
+            })
+        })?;
     Ok(value)
+}
+
+// TODO: remove
+fn tmp_validate_sequence_set(value: &str) -> Result<&str> {
+    todo!()
 }
 
 /// An authenticated IMAP session providing the usual IMAP commands. This type is what you get from
@@ -366,9 +385,9 @@ impl<T: Read + Write> Client<T> {
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
         let synopsis = "LOGIN username password";
         let u =
-            ok_or_unauth_client_err!(validate_str2(synopsis, "username", username.as_ref()), self);
+            ok_or_unauth_client_err!(validate_str(synopsis, "username", username.as_ref()), self);
         let p =
-            ok_or_unauth_client_err!(validate_str2(synopsis, "password", password.as_ref()), self);
+            ok_or_unauth_client_err!(validate_str(synopsis, "password", password.as_ref()), self);
         ok_or_unauth_client_err!(
             self.run_command_and_check_ok(&format!("LOGIN {} {}", u, p)),
             self
@@ -516,7 +535,7 @@ impl<T: Read + Write> Session<T> {
     pub fn select<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         self.run(&format!(
             "SELECT {}",
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
         .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
     }
@@ -528,7 +547,7 @@ impl<T: Read + Write> Session<T> {
     pub fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
         self.run(&format!(
             "EXAMINE {}",
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
         .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
     }
@@ -601,8 +620,8 @@ impl<T: Read + Write> Session<T> {
         } else {
             self.run_command_and_read_response(&format!(
                 "FETCH {} {}",
-                validate_sequence_set(sequence_set.as_ref()).map_err(tmp_validate_error)?,
-                validate_str_noquote(query.as_ref()).map_err(tmp_validate_error)?
+                tmp_validate_sequence_set(sequence_set.as_ref())?,
+                tmp_validate_str_noquote(query.as_ref())?
             ))
             .and_then(|lines| Fetches::parse(lines, &mut self.unsolicited_responses_tx))
         }
@@ -620,8 +639,8 @@ impl<T: Read + Write> Session<T> {
         } else {
             self.run_command_and_read_response(&format!(
                 "UID FETCH {} {}",
-                validate_sequence_set(uid_set.as_ref()).map_err(tmp_validate_error)?,
-                validate_str_noquote(query.as_ref()).map_err(tmp_validate_error)?
+                tmp_validate_sequence_set(uid_set.as_ref())?,
+                tmp_validate_str_noquote(query.as_ref())?
             ))
             .and_then(|lines| Fetches::parse(lines, &mut self.unsolicited_responses_tx))
         }
@@ -674,7 +693,7 @@ impl<T: Read + Write> Session<T> {
     pub fn create<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
         self.run_command_and_check_ok(&format!(
             "CREATE {}",
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
     }
 
@@ -700,7 +719,7 @@ impl<T: Read + Write> Session<T> {
     pub fn delete<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
         self.run_command_and_check_ok(&format!(
             "DELETE {}",
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
     }
 
@@ -977,7 +996,7 @@ impl<T: Read + Write> Session<T> {
         self.run_command_and_check_ok(&format!(
             "MOVE {} {}",
             sequence_set.as_ref(),
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
     }
 
@@ -993,7 +1012,7 @@ impl<T: Read + Write> Session<T> {
         self.run_command_and_check_ok(&format!(
             "UID MOVE {} {}",
             uid_set.as_ref(),
-            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+            tmp_validate_str(mailbox_name.as_ref())?
         ))
     }
 
@@ -1111,7 +1130,7 @@ impl<T: Read + Write> Session<T> {
         let mailbox_name = mailbox_name.as_ref();
         self.run_command_and_read_response(&format!(
             "STATUS {} {}",
-            validate_str(mailbox_name).map_err(tmp_validate_error)?,
+            tmp_validate_str(mailbox_name)?,
             data_items.as_ref()
         ))
         .and_then(|lines| {
@@ -1609,7 +1628,7 @@ mod tests {
     }
 
     #[test]
-    fn login_validation() {
+    fn login_validation_1() {
         let response = b"a1 OK Logged in\r\n".to_vec();
         let mock_stream = MockStream::new(response);
         let client = Client::new(mock_stream);
@@ -1619,21 +1638,39 @@ mod tests {
         assert_eq!(
             client
                 .login(username, password)
-                .expect_err("Error expected")
+                .expect_err("Error expected, but got success")
                 .0
                 .to_string(),
             Error::Validate(ValidateError {
-                command_synopsis: "LOGIN username password",
+                command_synopsis: "LOGIN username password".to_owned(),
                 argument: "username",
                 offending_char: '\n'
             })
             .to_string()
         );
-        // TODO: remove
-        // assert!(
-        //     session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
-        //     "Invalid login command"
-        // );
+    }
+
+    #[test]
+    fn login_validation_2() {
+        let response = b"a1 OK Logged in\r\n".to_vec();
+        let mock_stream = MockStream::new(response);
+        let client = Client::new(mock_stream);
+
+        let username = "username";
+        let password = "passw\rord";
+        assert_eq!(
+            client
+                .login(username, password)
+                .expect_err("Error expected, but got success")
+                .0
+                .to_string(),
+            Error::Validate(ValidateError {
+                command_synopsis: "LOGIN username password".to_owned(),
+                argument: "password",
+                offending_char: '\r'
+            })
+            .to_string()
+        );
     }
 
     #[test]
@@ -2132,13 +2169,13 @@ mod tests {
     fn validate_random() {
         assert_eq!(
             "\"~iCQ_k;>[&\\\"sVCvUW`e<<P!wJ\"",
-            &validate_str("~iCQ_k;>[&\"sVCvUW`e<<P!wJ").unwrap()
+            &validate_str("COMMAND", "arg1", "~iCQ_k;>[&\"sVCvUW`e<<P!wJ").unwrap()
         );
     }
 
     #[test]
     fn validate_newline() {
-        if let Err(ref e) = validate_str("test\nstring").map_err(tmp_validate_error) {
+        if let Err(ref e) = validate_str("COMMAND", "arg1", "test\nstring") {
             if let &Error::Validate(ref ve) = e {
                 if ve.offending_char == '\n' {
                     return;
@@ -2152,7 +2189,7 @@ mod tests {
     #[test]
     #[allow(unreachable_patterns)]
     fn validate_carriage_return() {
-        if let Err(ref e) = validate_str("test\rstring").map_err(tmp_validate_error) {
+        if let Err(ref e) = validate_str("COMMAND", "arg1", "test\rstring") {
             if let &Error::Validate(ref ve) = e {
                 if ve.offending_char == '\r' {
                     return;

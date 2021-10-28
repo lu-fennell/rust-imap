@@ -258,7 +258,8 @@ impl StdError for ParseError {
 #[derive(Debug)]
 pub struct ValidateError {
     /// the synopsis of the invalid command
-    pub command_synopsis: &'static str,
+    //TODO: should be static str
+    pub command_synopsis: String,
     /// the name of the invalid argument
     pub argument: &'static str,
     /// the invalid character contained in the argument
@@ -294,7 +295,7 @@ mod tests {
     fn validate_error_display() {
         assert_eq!(
             ValidateError {
-                command_synopsis: "COMMAND arg1 arg2",
+                command_synopsis: "COMMAND arg1 arg2".to_owned(),
                 argument: "arg2",
                 offending_char: '\n'
             }
