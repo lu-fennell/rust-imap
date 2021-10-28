@@ -109,7 +109,11 @@ fn tmp_validate_str_noquote(value: &str) -> Result<&str> {
 ///
 /// Note the lack of reference to SP or any other such whitespace terminals.
 /// Per this grammar, in theory we ought to be even more restrictive than "no whitespace".
-fn validate_sequence_set<'a>(synopsis: &'static str, arg_name: &'static str, value: &'a str) -> Result<&'a str> {
+fn validate_sequence_set<'a>(
+    synopsis: &'static str,
+    arg_name: &'static str,
+    value: &'a str,
+) -> Result<&'a str> {
     value
         .matches(|c: char| c.is_ascii_whitespace())
         .next()
@@ -1627,49 +1631,58 @@ mod tests {
         );
     }
 
-    #[test]
-    fn login_validation_1() {
-        let response = b"a1 OK Logged in\r\n".to_vec();
+    // TODO: move
+    fn assert_validation_error<F>(
+        // result: ,
+        run_command: F,
+        expected_synopsis: &'static str,
+        expected_argument: &'static str,
+        expected_char: char,
+    ) where
+        F: FnOnce(
+            Client<MockStream>,
+        ) -> std::result::Result<Session<MockStream>, (Error, Client<MockStream>)>,
+    {
+        let response = Vec::new();
         let mock_stream = MockStream::new(response);
         let client = Client::new(mock_stream);
-
-        let username = "username\n";
-        let password = "password";
         assert_eq!(
-            client
-                .login(username, password)
+            run_command(client)
                 .expect_err("Error expected, but got success")
                 .0
                 .to_string(),
             Error::Validate(ValidateError {
-                command_synopsis: "LOGIN username password".to_owned(),
-                argument: "username",
-                offending_char: '\n'
+                command_synopsis: expected_synopsis.to_owned(),
+                argument: expected_argument,
+                offending_char: expected_char
             })
             .to_string()
         );
     }
 
     #[test]
-    fn login_validation_2() {
-        let response = b"a1 OK Logged in\r\n".to_vec();
-        let mock_stream = MockStream::new(response);
-        let client = Client::new(mock_stream);
+    fn login_validation_username() {
+
+        let username = "username\n";
+        let password = "password";
+        assert_validation_error(
+            |client| client.login(username, password),
+            "LOGIN username password",
+            "username",
+            '\n',
+        );
+    }
+
+    #[test]
+    fn login_validation_password() {
 
         let username = "username";
         let password = "passw\rord";
-        assert_eq!(
-            client
-                .login(username, password)
-                .expect_err("Error expected, but got success")
-                .0
-                .to_string(),
-            Error::Validate(ValidateError {
-                command_synopsis: "LOGIN username password".to_owned(),
-                argument: "password",
-                offending_char: '\r'
-            })
-            .to_string()
+        assert_validation_error(
+            |client| client.login(username, password),
+            "LOGIN username password",
+            "password",
+            '\r',
         );
     }
 
