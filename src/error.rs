@@ -261,7 +261,7 @@ pub struct ValidateError {
     //TODO: should be static str
     pub command_synopsis: String,
     /// the name of the invalid argument
-    pub argument: &'static str,
+    pub argument: String,
     /// the invalid character contained in the argument
     pub offending_char: char,
 }
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(
             ValidateError {
                 command_synopsis: "COMMAND arg1 arg2".to_owned(),
-                argument: "arg2",
+                argument: "arg2".to_string(),
                 offending_char: '\n'
             }
             .to_string(),

@@ -23,19 +23,20 @@ use std::sync::mpsc;
 use crate::error::No;
 
 trait CmdListItemFormat {
-    fn format_as_cmd_list_item(&self) -> String;
+    fn format_as_cmd_list_item(&self, item_index : usize) -> Result<String>;
 }
 
 impl CmdListItemFormat for Metadata {
-    fn format_as_cmd_list_item(&self) -> String {
-        format!(
+    fn format_as_cmd_list_item(&self, item_index: usize) -> Result<String> {
+        let synopsis = "SETMETADATA mailbox (entry value ..)";
+        Ok(format!(
             "{} {}",
-            tmp_validate_str(self.entry.as_str()).unwrap(),
+            validate_str(synopsis, &format!("entry#{}", item_index + 1), self.entry.as_str())?,
             self.value
                 .as_ref()
-                .map(|v| tmp_validate_str(v.as_str()).unwrap())
-                .unwrap_or_else(|| "NIL".to_string())
-        )
+                .map(|v| validate_str(synopsis, &format!("value#{}", item_index + 1), v.as_str()))
+                .unwrap_or_else(|| Ok("NIL".to_string()))?
+        ))
     }
 }
 
@@ -168,10 +169,16 @@ impl<T: Read + Write> Session<T> {
         depth: MetadataDepth,
         maxsize: Option<usize>,
     ) -> Result<(Vec<Metadata>, Option<u64>)> {
+        let synopsis = if mailbox.is_some() {
+            "GETMETADATA options mailbox (entry ..)"
+        } else {
+            "GETMETADATA options \"\" (entry ..)"
+        };
         let v: Vec<String> = entries
             .iter()
-            .map(|e| tmp_validate_str(e.as_ref()).unwrap())
-            .collect();
+            .enumerate()
+            .map(|(i, e)| validate_str(&synopsis, &format!("entry#{}", i + 1), e.as_ref()))
+            .collect::<Result<_>>()?;
         let s = v.as_slice().join(" ");
         let mut command = format!("GETMETADATA (DEPTH {}", depth.depth_str());
 
@@ -183,8 +190,8 @@ impl<T: Read + Write> Session<T> {
             format!(
                 ") {} ({})",
                 mailbox
-                    .map(|mbox| tmp_validate_str(mbox).unwrap())
-                    .unwrap_or_else(|| "\"\"".to_string()),
+                    .map(|mbox| validate_str(&synopsis, "mailbox", mbox))
+                    .unwrap_or_else(|| Ok("\"\"".to_string()))?,
                 s
             )
             .as_str(),
@@ -235,10 +242,11 @@ impl<T: Read + Write> Session<T> {
     pub fn set_metadata(&mut self, mbox: impl AsRef<str>, annotations: &[Metadata]) -> Result<()> {
         let v: Vec<String> = annotations
             .iter()
-            .map(|metadata| metadata.format_as_cmd_list_item())
-            .collect();
+            .enumerate()
+            .map(|(i, metadata)| metadata.format_as_cmd_list_item(i))
+            .collect::<Result<_>>()?;
         let s = v.as_slice().join(" ");
-        let command = format!("SETMETADATA {} ({})", tmp_validate_str(mbox.as_ref())?, s);
+        let command = format!("SETMETADATA {} ({})", validate_str("SETMETADATA mailbox (entry value ..)", "mailbox", mbox.as_ref())?, s);
         self.run_command_and_check_ok(command)
     }
 }
@@ -286,13 +294,17 @@ mod tests {
             |mut session| {
                 session.get_metadata(
                     None,
-                    &["/shared/vendor\n/vendor.coi", "/shared/comment"],
+                    &[
+                        "/shared/vendor\n/vendor.coi",
+                        "/shared/comment",
+                        "/some/other/entry",
+                    ],
                     MetadataDepth::Infinity,
                     None,
                 )
             },
-            "GETMETADATA \"\" (entry1 entry2)",
-            "entry1",
+            "GETMETADATA options \"\" (entry ..)",
+            "entry#1",
             '\n',
         )
     }
@@ -308,27 +320,10 @@ mod tests {
                     None,
                 )
             },
-            "GETMETADATA mailbox (entry1 entry2)",
-            "entry2",
+            "GETMETADATA options mailbox (entry ..)",
+            "entry#2",
             '\r',
         )
-    }
-
-    #[test]
-    fn test_getmetadata_validation_entry() {
-        assert_validation_error_session(
-            |mut session| {
-                session.get_metadata(
-                    None,
-                    &["/shared/\rvendor/vendor.coi"],
-                    MetadataDepth::Infinity,
-                    None,
-                )
-            },
-            "GETMETADATA \"\" entry",
-            "entry",
-            '\r',
-        );
     }
 
     #[test]
@@ -342,7 +337,7 @@ mod tests {
                     None,
                 )
             },
-            "GETMETADATA mailbox (entry1 entry2)",
+            "GETMETADATA options mailbox (entry ..)",
             "mailbox",
             '\n',
         );
@@ -366,7 +361,7 @@ mod tests {
                     ],
                 )
             },
-            "SETMETADATA mailbox (entry1 entry2)",
+            "SETMETADATA mailbox (entry value ..)",
             "mailbox",
             '\n',
         );
@@ -380,7 +375,7 @@ mod tests {
                     "INBOX",
                     &[
                         Metadata {
-                            entry: "/shared/vendor/vendor.coi".to_string(),
+                            entry: "/shared/\nvendor/vendor.coi".to_string(),
                             value: None,
                         },
                         Metadata {
@@ -390,8 +385,8 @@ mod tests {
                     ],
                 )
             },
-            "SETMETADATA mailbox (entry1 entry2)",
-            "entry1",
+            "SETMETADATA mailbox (entry value ..)",
+            "entry#1",
             '\n',
         );
     }
@@ -414,9 +409,8 @@ mod tests {
                     ],
                 )
             },
-            "SETMETADATA mailbox (entry1 entry2)",
-            // TODO: mention that it is about the key?
-            "entry2",
+            "SETMETADATA mailbox (entry value ..)",
+            "entry#2",
             '\r',
         );
     }
@@ -439,9 +433,8 @@ mod tests {
                     ],
                 )
             },
-            "SETMETADATA mailbox (entry1 entry2)",
-            // TODO: mention that it is about the key?
-            "entry2",
+            "SETMETADATA mailbox (entry value ..)",
+            "value#2",
             '\n',
         );
     }
@@ -452,16 +445,14 @@ mod tests {
             |mut session| {
                 session.set_metadata(
                     "INBOX",
-                    &[
-                        Metadata {
-                            entry: "/shared/\nvendor/vendor.coi".to_string(),
-                            value: None,
-                        },
-                    ],
+                    &[Metadata {
+                        entry: "/shared/\nvendor/vendor.coi".to_string(),
+                        value: None,
+                    }],
                 )
             },
-            "SETMETADATA mailbox entry",
-            "entry",
+            "SETMETADATA mailbox (entry value ..)",
+            "entry#1",
             '\n',
         );
     }
