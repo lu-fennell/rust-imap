@@ -46,6 +46,15 @@ pub(crate) fn validate_str(value: &str) -> Result<String> {
     Ok(quote!(value))
 }
 
+// TODO: remove
+fn tmp_validate_error(c: char) -> ValidateError {
+    ValidateError {
+        command_synopsis: "TODO",
+        argument: "TODO",
+        offending_char: c,
+    }
+}
+
 /// Ensure the input doesn't contain a command-terminator (newline), but don't quote it like
 /// `validate_str`.
 /// This is helpful for things like the FETCH attributes, which,
@@ -66,7 +75,7 @@ fn validate_str_noquote(value: &str) -> Result<&str> {
         .matches(|c| c == '\n' || c == '\r')
         .next()
         .and_then(|s| s.chars().next())
-        .map(|offender| Error::Validate(ValidateError(offender)))
+        .map(|offender| Error::Validate(tmp_validate_error(offender)))
         .err()?;
     Ok(value)
 }
@@ -89,7 +98,7 @@ fn validate_sequence_set(value: &str) -> Result<&str> {
         .matches(|c: char| c.is_ascii_whitespace())
         .next()
         .and_then(|s| s.chars().next())
-        .map(|offender| Error::Validate(ValidateError(offender)))
+        .map(|offender| Error::Validate(tmp_validate_error(offender)))
         .err()?;
     Ok(value)
 }
@@ -1576,6 +1585,34 @@ mod tests {
     }
 
     #[test]
+    fn login_validation() {
+        let response = b"a1 OK Logged in\r\n".to_vec();
+        let mock_stream = MockStream::new(response);
+        let client = Client::new(mock_stream);
+
+        let username = "username\n";
+        let password = "password";
+        assert_eq!(
+            client
+                .login(username, password)
+                .expect_err("Error expected")
+                .0
+                .to_string(),
+            Error::Validate(ValidateError {
+                command_synopsis: "LOGIN username password",
+                argument: "username",
+                offending_char: '\n'
+            })
+            .to_string()
+        );
+        // TODO: remove
+        // assert!(
+        //     session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
+        //     "Invalid login command"
+        // );
+    }
+
+    #[test]
     fn logout() {
         let response = b"a1 OK Logout completed.\r\n".to_vec();
         let command = format!("a1 LOGOUT\r\n");
@@ -2079,7 +2116,7 @@ mod tests {
     fn validate_newline() {
         if let Err(ref e) = validate_str("test\nstring") {
             if let &Error::Validate(ref ve) = e {
-                if ve.0 == '\n' {
+                if ve.offending_char == '\n' {
                     return;
                 }
             }
@@ -2093,7 +2130,7 @@ mod tests {
     fn validate_carriage_return() {
         if let Err(ref e) = validate_str("test\rstring") {
             if let &Error::Validate(ref ve) = e {
-                if ve.0 == '\r' {
+                if ve.offending_char == '\r' {
                     return;
                 }
             }
