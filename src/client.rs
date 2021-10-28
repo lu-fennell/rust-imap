@@ -18,6 +18,15 @@ const INITIAL_TAG: u32 = 0;
 const CR: u8 = 0x0d;
 const LF: u8 = 0x0a;
 
+// TODO: remove
+pub(crate) fn tmp_validate_error(c: char) -> Error {
+    Error::Validate(ValidateError {
+        command_synopsis: "TODO",
+        argument: "TODO",
+        offending_char: c,
+    })
+}
+
 macro_rules! quote {
     ($x:expr) => {
         format!("\"{}\"", $x.replace(r"\", r"\\").replace("\"", "\\\""))
@@ -41,18 +50,9 @@ impl<E> OptionExt<E> for Option<E> {
 /// grammar](https://tools.ietf.org/html/rfc3501#section-9)
 /// calls "quoted", which is reachable from "string" et al.
 /// Also ensure it doesn't contain a colliding command-delimiter (newline).
-pub(crate) fn validate_str(value: &str) -> Result<String> {
+pub(crate) fn validate_str(value: &str) -> std::result::Result<String, char> {
     validate_str_noquote(value)?;
     Ok(quote!(value))
-}
-
-// TODO: remove
-fn tmp_validate_error(c: char) -> ValidateError {
-    ValidateError {
-        command_synopsis: "TODO",
-        argument: "TODO",
-        offending_char: c,
-    }
 }
 
 /// Ensure the input doesn't contain a command-terminator (newline), but don't quote it like
@@ -70,12 +70,11 @@ fn tmp_validate_error(c: char) -> ValidateError {
 /// >             "BODY.PEEK" section ["<" number "." nz-number ">"]
 ///
 /// Note the lack of reference to any of the string-like rules or the quote characters themselves.
-fn validate_str_noquote(value: &str) -> Result<&str> {
+fn validate_str_noquote(value: &str) -> std::result::Result<&str, char> {
     value
         .matches(|c| c == '\n' || c == '\r')
         .next()
         .and_then(|s| s.chars().next())
-        .map(|offender| Error::Validate(tmp_validate_error(offender)))
         .err()?;
     Ok(value)
 }
@@ -93,12 +92,11 @@ fn validate_str_noquote(value: &str) -> Result<&str> {
 ///
 /// Note the lack of reference to SP or any other such whitespace terminals.
 /// Per this grammar, in theory we ought to be even more restrictive than "no whitespace".
-fn validate_sequence_set(value: &str) -> Result<&str> {
+fn validate_sequence_set(value: &str) -> std::result::Result<&str, char> {
     value
         .matches(|c: char| c.is_ascii_whitespace())
         .next()
         .and_then(|s| s.chars().next())
-        .map(|offender| Error::Validate(tmp_validate_error(offender)))
         .err()?;
     Ok(value)
 }
@@ -356,8 +354,8 @@ impl<T: Read + Write> Client<T> {
         username: U,
         password: P,
     ) -> ::std::result::Result<Session<T>, (Error, Client<T>)> {
-        let u = ok_or_unauth_client_err!(validate_str(username.as_ref()), self);
-        let p = ok_or_unauth_client_err!(validate_str(password.as_ref()), self);
+        let u = ok_or_unauth_client_err!(validate_str(username.as_ref()).map_err(tmp_validate_error), self);
+        let p = ok_or_unauth_client_err!(validate_str(password.as_ref()).map_err(tmp_validate_error), self);
         ok_or_unauth_client_err!(
             self.run_command_and_check_ok(&format!("LOGIN {} {}", u, p)),
             self
@@ -503,8 +501,11 @@ impl<T: Read + Write> Session<T> {
     /// `EXISTS`, `FETCH`, and `EXPUNGE` responses. You can get them from the
     /// `unsolicited_responses` channel of the [`Session`](struct.Session.html).
     pub fn select<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
-        self.run(&format!("SELECT {}", validate_str(mailbox_name.as_ref())?))
-            .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
+        self.run(&format!(
+            "SELECT {}",
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
+        ))
+        .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
     }
 
     /// The `EXAMINE` command is identical to [`Session::select`] and returns the same output;
@@ -512,7 +513,7 @@ impl<T: Read + Write> Session<T> {
     /// of the mailbox, including per-user state, will happen in a mailbox opened with `examine`;
     /// in particular, messagess cannot lose [`Flag::Recent`] in an examined mailbox.
     pub fn examine<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<Mailbox> {
-        self.run(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref())?))
+        self.run(&format!("EXAMINE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
             .and_then(|(lines, _)| parse_mailbox(&lines[..], &mut self.unsolicited_responses_tx))
     }
 
@@ -584,8 +585,8 @@ impl<T: Read + Write> Session<T> {
         } else {
             self.run_command_and_read_response(&format!(
                 "FETCH {} {}",
-                validate_sequence_set(sequence_set.as_ref())?,
-                validate_str_noquote(query.as_ref())?
+                validate_sequence_set(sequence_set.as_ref()).map_err(tmp_validate_error)?,
+                validate_str_noquote(query.as_ref()).map_err(tmp_validate_error)?
             ))
             .and_then(|lines| Fetches::parse(lines, &mut self.unsolicited_responses_tx))
         }
@@ -603,8 +604,8 @@ impl<T: Read + Write> Session<T> {
         } else {
             self.run_command_and_read_response(&format!(
                 "UID FETCH {} {}",
-                validate_sequence_set(uid_set.as_ref())?,
-                validate_str_noquote(query.as_ref())?
+                validate_sequence_set(uid_set.as_ref()).map_err(tmp_validate_error)?,
+                validate_str_noquote(query.as_ref()).map_err(tmp_validate_error)?
             ))
             .and_then(|lines| Fetches::parse(lines, &mut self.unsolicited_responses_tx))
         }
@@ -655,7 +656,7 @@ impl<T: Read + Write> Session<T> {
     /// See the description of the [`UID`
     /// command](https://tools.ietf.org/html/rfc3501#section-6.4.8) for more detail.
     pub fn create<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
-        self.run_command_and_check_ok(&format!("CREATE {}", validate_str(mailbox_name.as_ref())?))
+        self.run_command_and_check_ok(&format!("CREATE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
     }
 
     /// The [`DELETE` command](https://tools.ietf.org/html/rfc3501#section-6.3.4) permanently
@@ -678,7 +679,7 @@ impl<T: Read + Write> Session<T> {
     /// See the description of the [`UID`
     /// command](https://tools.ietf.org/html/rfc3501#section-6.4.8) for more detail.
     pub fn delete<S: AsRef<str>>(&mut self, mailbox_name: S) -> Result<()> {
-        self.run_command_and_check_ok(&format!("DELETE {}", validate_str(mailbox_name.as_ref())?))
+        self.run_command_and_check_ok(&format!("DELETE {}", validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?))
     }
 
     /// The [`RENAME` command](https://tools.ietf.org/html/rfc3501#section-6.3.5) changes the name
@@ -706,6 +707,7 @@ impl<T: Read + Write> Session<T> {
     /// to a new mailbox with the given name, leaving `INBOX` empty.  If the server implementation
     /// supports inferior hierarchical names of `INBOX`, these are unaffected by a rename of
     /// `INBOX`.
+    //TODO: no validation?
     pub fn rename<S1: AsRef<str>, S2: AsRef<str>>(&mut self, from: S1, to: S2) -> Result<()> {
         self.run_command_and_check_ok(&format!(
             "RENAME {} {}",
@@ -953,7 +955,7 @@ impl<T: Read + Write> Session<T> {
         self.run_command_and_check_ok(&format!(
             "MOVE {} {}",
             sequence_set.as_ref(),
-            validate_str(mailbox_name.as_ref())?
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
         ))
     }
 
@@ -969,7 +971,7 @@ impl<T: Read + Write> Session<T> {
         self.run_command_and_check_ok(&format!(
             "UID MOVE {} {}",
             uid_set.as_ref(),
-            validate_str(mailbox_name.as_ref())?
+            validate_str(mailbox_name.as_ref()).map_err(tmp_validate_error)?
         ))
     }
 
@@ -1087,7 +1089,7 @@ impl<T: Read + Write> Session<T> {
         let mailbox_name = mailbox_name.as_ref();
         self.run_command_and_read_response(&format!(
             "STATUS {} {}",
-            validate_str(mailbox_name)?,
+            validate_str(mailbox_name).map_err(tmp_validate_error)?,
             data_items.as_ref()
         ))
         .and_then(|lines| {
@@ -2114,7 +2116,7 @@ mod tests {
 
     #[test]
     fn validate_newline() {
-        if let Err(ref e) = validate_str("test\nstring") {
+        if let Err(ref e) = validate_str("test\nstring").map_err(tmp_validate_error) {
             if let &Error::Validate(ref ve) = e {
                 if ve.offending_char == '\n' {
                     return;
@@ -2128,7 +2130,7 @@ mod tests {
     #[test]
     #[allow(unreachable_patterns)]
     fn validate_carriage_return() {
-        if let Err(ref e) = validate_str("test\rstring") {
+        if let Err(ref e) = validate_str("test\rstring").map_err(tmp_validate_error) {
             if let &Error::Validate(ref ve) = e {
                 if ve.offending_char == '\r' {
                     return;

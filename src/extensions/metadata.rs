@@ -238,7 +238,7 @@ impl<T: Read + Write> Session<T> {
             .map(|metadata| metadata.format_as_cmd_list_item())
             .collect();
         let s = v.as_slice().join(" ");
-        let command = format!("SETMETADATA {} ({})", validate_str(mbox.as_ref())?, s);
+        let command = format!("SETMETADATA {} ({})", validate_str(mbox.as_ref()).map_err(tmp_validate_error)?, s);
         self.run_command_and_check_ok(command)
     }
 }
