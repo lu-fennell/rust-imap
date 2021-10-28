@@ -276,4 +276,193 @@ mod tests {
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
+
+    use crate::client::tests::assert_validation_error_session;
+
+    #[test]
+    // TODO: specify which entry the problem is in
+    fn test_getmetadata_validation_entry1() {
+        assert_validation_error_session(
+            |mut session| {
+                session.get_metadata(
+                    None,
+                    &["/shared/vendor\n/vendor.coi", "/shared/comment"],
+                    MetadataDepth::Infinity,
+                    None,
+                )
+            },
+            "GETMETADATA \"\" (entry1 entry2)",
+            "entry1",
+            '\n',
+        )
+    }
+
+    #[test]
+    fn test_getmetadata_validation_entry2() {
+        assert_validation_error_session(
+            |mut session| {
+                session.get_metadata(
+                    Some("INBOX"),
+                    &["/shared/vendor/vendor.coi", "/\rshared/comment"],
+                    MetadataDepth::Infinity,
+                    None,
+                )
+            },
+            "GETMETADATA mailbox (entry1 entry2)",
+            "entry2",
+            '\r',
+        )
+    }
+
+    #[test]
+    fn test_getmetadata_validation_entry() {
+        assert_validation_error_session(
+            |mut session| {
+                session.get_metadata(
+                    None,
+                    &["/shared/\rvendor/vendor.coi"],
+                    MetadataDepth::Infinity,
+                    None,
+                )
+            },
+            "GETMETADATA \"\" entry",
+            "entry",
+            '\r',
+        );
+    }
+
+    #[test]
+    fn test_getmetadata_validation_mailbox() {
+        assert_validation_error_session(
+            |mut session| {
+                session.get_metadata(
+                    Some("INB\nOX"),
+                    &["/shared/vendor/vendor.coi", "/shared/comment"],
+                    MetadataDepth::Infinity,
+                    None,
+                )
+            },
+            "GETMETADATA mailbox (entry1 entry2)",
+            "mailbox",
+            '\n',
+        );
+    }
+
+    #[test]
+    fn test_setmetadata_validation_mailbox() {
+        assert_validation_error_session(
+            |mut session| {
+                session.set_metadata(
+                    "INB\nOX",
+                    &[
+                        Metadata {
+                            entry: "/shared/vendor/vendor.coi".to_string(),
+                            value: None,
+                        },
+                        Metadata {
+                            entry: "/shared/comment".to_string(),
+                            value: Some("value".to_string()),
+                        },
+                    ],
+                )
+            },
+            "SETMETADATA mailbox (entry1 entry2)",
+            "mailbox",
+            '\n',
+        );
+    }
+
+    #[test]
+    fn test_setmetadata_validation_entry1() {
+        assert_validation_error_session(
+            |mut session| {
+                session.set_metadata(
+                    "INBOX",
+                    &[
+                        Metadata {
+                            entry: "/shared/vendor/vendor.coi".to_string(),
+                            value: None,
+                        },
+                        Metadata {
+                            entry: "/shared/comment".to_string(),
+                            value: Some("value".to_string()),
+                        },
+                    ],
+                )
+            },
+            "SETMETADATA mailbox (entry1 entry2)",
+            "entry1",
+            '\n',
+        );
+    }
+
+    #[test]
+    fn test_setmetadata_validation_entry2_key() {
+        assert_validation_error_session(
+            |mut session| {
+                session.set_metadata(
+                    "INBOX",
+                    &[
+                        Metadata {
+                            entry: "/shared/vendor/vendor.coi".to_string(),
+                            value: None,
+                        },
+                        Metadata {
+                            entry: "/shared\r/comment".to_string(),
+                            value: Some("value".to_string()),
+                        },
+                    ],
+                )
+            },
+            "SETMETADATA mailbox (entry1 entry2)",
+            // TODO: mention that it is about the key?
+            "entry2",
+            '\r',
+        );
+    }
+
+    #[test]
+    fn test_setmetadata_validation_entry2_value() {
+        assert_validation_error_session(
+            |mut session| {
+                session.set_metadata(
+                    "INBOX",
+                    &[
+                        Metadata {
+                            entry: "/shared/vendor/vendor.coi".to_string(),
+                            value: None,
+                        },
+                        Metadata {
+                            entry: "/shared/comment".to_string(),
+                            value: Some("va\nlue".to_string()),
+                        },
+                    ],
+                )
+            },
+            "SETMETADATA mailbox (entry1 entry2)",
+            // TODO: mention that it is about the key?
+            "entry2",
+            '\n',
+        );
+    }
+
+    #[test]
+    fn test_setmetadata_validation_entry() {
+        assert_validation_error_session(
+            |mut session| {
+                session.set_metadata(
+                    "INBOX",
+                    &[
+                        Metadata {
+                            entry: "/shared/\nvendor/vendor.coi".to_string(),
+                            value: None,
+                        },
+                    ],
+                )
+            },
+            "SETMETADATA mailbox entry",
+            "entry",
+            '\n',
+        );
+    }
 }

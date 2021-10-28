@@ -1492,7 +1492,8 @@ impl<T: Read + Write> Connection<T> {
 }
 
 #[cfg(test)]
-mod tests {
+// TODO: really pub(crate)? maybe put something into testutil?
+pub(crate) mod tests {
     use super::super::error::Result;
     use super::super::mock_stream::MockStream;
     use super::*;
@@ -1632,8 +1633,7 @@ mod tests {
     }
 
     // TODO: move
-    fn assert_validation_error<F>(
-        // result: ,
+    fn assert_validation_error_client<F>(
         run_command: F,
         expected_synopsis: &'static str,
         expected_argument: &'static str,
@@ -1660,12 +1660,36 @@ mod tests {
         );
     }
 
+    pub(crate) fn assert_validation_error_session<F, R>(
+        run_command: F,
+        expected_synopsis: &'static str,
+        expected_argument: &'static str,
+        expected_char: char,
+    ) where
+        F: FnOnce(Session<MockStream>) -> Result<R>,
+    {
+        let response = Vec::new();
+        let mock_stream = MockStream::new(response);
+        let session = mock_session!(mock_stream);
+        assert_eq!(
+            run_command(session)
+                .map(|_| ())
+                .expect_err("Error expected, but got success")
+                .to_string(),
+            Error::Validate(ValidateError {
+                command_synopsis: expected_synopsis.to_owned(),
+                argument: expected_argument,
+                offending_char: expected_char
+            })
+            .to_string()
+        );
+    }
+
     #[test]
     fn login_validation_username() {
-
         let username = "username\n";
         let password = "password";
-        assert_validation_error(
+        assert_validation_error_client(
             |client| client.login(username, password),
             "LOGIN username password",
             "username",
@@ -1675,10 +1699,9 @@ mod tests {
 
     #[test]
     fn login_validation_password() {
-
         let username = "username";
         let password = "passw\rord";
-        assert_validation_error(
+        assert_validation_error_client(
             |client| client.login(username, password),
             "LOGIN username password",
             "password",
@@ -1855,6 +1878,16 @@ mod tests {
     }
 
     #[test]
+    fn examine_validation() {
+        assert_validation_error_session(
+            |mut session| session.examine("INB\nOX"),
+            "EXAMINE mailbox",
+            "mailbox",
+            '\n',
+        )
+    }
+
+    #[test]
     fn select() {
         let response = b"* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n\
             * OK [PERMANENTFLAGS (\\* \\Answered \\Flagged \\Deleted \\Draft \\Seen)] \
@@ -1900,6 +1933,17 @@ mod tests {
             "Invalid select command"
         );
         assert_eq!(mailbox, expected_mailbox);
+    }
+
+
+    #[test]
+    fn select_validation() {
+        assert_validation_error_session(
+            |mut session| session.select("INB\nOX"),
+            "SELECT mailbox",
+            "mailbox",
+            '\n',
+        )
     }
 
     #[test]
@@ -2018,6 +2062,16 @@ mod tests {
     }
 
     #[test]
+    fn create_validation() {
+        assert_validation_error_session(
+            |mut session| session.create("INB\nOX"),
+            "CREATE mailbox",
+            "mailbox",
+            '\n',
+        )
+    }
+
+    #[test]
     fn delete() {
         let response = b"a1 OK DELETE completed\r\n".to_vec();
         let mailbox_name = "INBOX";
@@ -2029,6 +2083,16 @@ mod tests {
             session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
             "Invalid delete command"
         );
+    }
+
+    #[test]
+    fn delete_validation() {
+        assert_validation_error_session(
+            |mut session| session.delete("INB\nOX"),
+            "DELETE mailbox",
+            "mailbox",
+            '\n',
+        )
     }
 
     #[test]
@@ -2120,6 +2184,26 @@ mod tests {
     }
 
     #[test]
+    fn mv_validation_seq() {
+        assert_validation_error_session(
+            |mut session| session.mv("1:\n2", "MEETING"),
+            "MOVE seq mailbox",
+            "seq",
+            '\n',
+        )
+    }
+
+    #[test]
+    fn mv_validation_query() {
+        assert_validation_error_session(
+            |mut session| session.mv("1:2", "MEE\nTING"),
+            "MOVE seq mailbox",
+            "mailbox",
+            '\n',
+        )
+    }
+
+    #[test]
     fn uid_mv() {
         let response = b"* OK [COPYUID 1511554416 142,399 41:42] Moved UIDs.\r\n\
             * 2 EXPUNGE\r\n\
@@ -2138,8 +2222,48 @@ mod tests {
     }
 
     #[test]
+    fn uid_mv_validation_seq() {
+        assert_validation_error_session(
+            |mut session| session.uid_mv("1:\n2", "MEETING"),
+            "UID MOVE seq mailbox",
+            "seq",
+            '\n',
+        )
+    }
+
+    #[test]
+    fn uid_mv_validation_query() {
+        assert_validation_error_session(
+            |mut session| session.uid_mv("1:2", "MEE\nTING"),
+            "UID MOVE seq mailbox",
+            "mailbox",
+            '\n',
+        )
+    }
+
+    #[test]
     fn fetch() {
         generic_fetch(" ", |c, seq, query| c.fetch(seq, query))
+    }
+
+    #[test]
+    fn fetch_validation_seq() {
+        assert_validation_error_session(
+            |mut session| session.fetch("\r1", "BODY[]"),
+            "FETCH seq query",
+            "seq",
+            '\r',
+        )
+    }
+
+    #[test]
+    fn fetch_validation_query() {
+        assert_validation_error_session(
+            |mut session| session.fetch("1", "BODY[\n]"),
+            "FETCH seq query",
+            "query",
+            '\n',
+        )
     }
 
     #[test]
@@ -2166,6 +2290,26 @@ mod tests {
             session.stream.get_ref().written_buf == line.as_bytes().to_vec(),
             "Invalid command"
         );
+    }
+
+    #[test]
+    fn uid_fetch_validation_seq() {
+        assert_validation_error_session(
+            |mut session| session.uid_fetch("\r1", "BODY[]"),
+            "UID FETCH seq query",
+            "seq",
+            '\r',
+        )
+    }
+
+    #[test]
+    fn uid_fetch_validation_query() {
+        assert_validation_error_session(
+            |mut session| session.uid_fetch("1", "BODY[\n]"),
+            "UID FETCH seq query",
+            "query",
+            '\n',
+        )
     }
 
     #[test]
