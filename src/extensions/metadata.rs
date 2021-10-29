@@ -177,7 +177,7 @@ impl<T: Read + Write> Session<T> {
         let v: Vec<String> = entries
             .iter()
             .enumerate()
-            .map(|(i, e)| validate_str(&synopsis, &format!("entry#{}", i + 1), e.as_ref()))
+            .map(|(i, e)| validate_str(synopsis, format!("entry#{}", i + 1), e.as_ref()))
             .collect::<Result<_>>()?;
         let s = v.as_slice().join(" ");
         let mut command = format!("GETMETADATA (DEPTH {}", depth.depth_str());
@@ -190,7 +190,7 @@ impl<T: Read + Write> Session<T> {
             format!(
                 ") {} ({})",
                 mailbox
-                    .map(|mbox| validate_str(&synopsis, "mailbox", mbox))
+                    .map(|mbox| validate_str(synopsis, "mailbox", mbox))
                     .unwrap_or_else(|| Ok("\"\"".to_string()))?,
                 s
             )
@@ -285,10 +285,9 @@ mod tests {
         }
     }
 
-    use crate::client::tests::assert_validation_error_session;
+    use crate::client::testutils::assert_validation_error_session;
 
     #[test]
-    // TODO: specify which entry the problem is in
     fn test_getmetadata_validation_entry1() {
         assert_validation_error_session(
             |mut session| {

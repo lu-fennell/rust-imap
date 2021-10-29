@@ -37,19 +37,16 @@ impl<E> OptionExt<E> for Option<E> {
     }
 }
 
-// TODO: remove
-pub(crate) fn tmp_validate_str(value: &str) -> Result<String> {
-    // validate_str("TODO", "TODO", value)
-    todo!()
-}
-
 /// Convert the input into what [the IMAP
 /// grammar](https://tools.ietf.org/html/rfc3501#section-9)
 /// calls "quoted", which is reachable from "string" et al.
 /// Also ensure it doesn't contain a colliding command-delimiter (newline).
-pub(crate) fn validate_str<'a, 'b>(
-    synopsis: &'a str,
-    arg_name: &'b str,
+///
+/// The arguments `synopsis` and `arg_name` are used to construct the error message of
+/// [ValidateError] in case validation fails.
+pub(crate) fn validate_str(
+    synopsis: impl Into<String>,
+    arg_name: impl Into<String>,
     value: &str,
 ) -> Result<String> {
     validate_str_noquote(synopsis, arg_name, value)?;
@@ -71,11 +68,14 @@ pub(crate) fn validate_str<'a, 'b>(
 /// >             "BODY.PEEK" section ["<" number "." nz-number ">"]
 ///
 /// Note the lack of reference to any of the string-like rules or the quote characters themselves.
-fn validate_str_noquote<'a, 'b, 'c>(
-    synopsis: &'b str,
-    arg_name: &'c str,
-    value: &'a str,
-) -> Result<&'a str> {
+///
+/// The arguments `synopsis` and `arg_name` are used to construct the error message of
+/// [ValidateError] in case validation fails.
+fn validate_str_noquote(
+    synopsis: impl Into<String>,
+    arg_name: impl Into<String>,
+    value: &str,
+) -> Result<&str> {
     value
         .matches(|c| c == '\n' || c == '\r')
         .next()
@@ -83,17 +83,12 @@ fn validate_str_noquote<'a, 'b, 'c>(
         .err()
         .map_err(|c| {
             Error::Validate(ValidateError {
-                command_synopsis: synopsis.to_owned(),
-                argument: arg_name.to_string(),
+                command_synopsis: synopsis.into(),
+                argument: arg_name.into(),
                 offending_char: c,
             })
         })?;
     Ok(value)
-}
-
-// TODO: remove
-fn tmp_validate_str_noquote(value: &str) -> Result<&str> {
-    todo!()
 }
 
 /// This ensures the input doesn't contain a command-terminator or any other whitespace
@@ -127,11 +122,6 @@ fn validate_sequence_set<'a>(
             })
         })?;
     Ok(value)
-}
-
-// TODO: remove
-fn tmp_validate_sequence_set(value: &str) -> Result<&str> {
-    todo!()
 }
 
 /// An authenticated IMAP session providing the usual IMAP commands. This type is what you get from
@@ -754,7 +744,6 @@ impl<T: Read + Write> Session<T> {
     /// to a new mailbox with the given name, leaving `INBOX` empty.  If the server implementation
     /// supports inferior hierarchical names of `INBOX`, these are unaffected by a rename of
     /// `INBOX`.
-    //TODO: no validation?
     pub fn rename<S1: AsRef<str>, S2: AsRef<str>>(&mut self, from: S1, to: S2) -> Result<()> {
         self.run_command_and_check_ok(&format!(
             "RENAME {} {}",
@@ -1136,7 +1125,7 @@ impl<T: Read + Write> Session<T> {
         let mailbox_name = mailbox_name.as_ref();
         self.run_command_and_read_response(&format!(
             "STATUS {} {}",
-            tmp_validate_str(mailbox_name)?,
+            validate_str("STATUS mailbox dataitems", "mailbox", mailbox_name)?,
             data_items.as_ref()
         ))
         .and_then(|lines| {
@@ -1494,19 +1483,82 @@ impl<T: Read + Write> Connection<T> {
 }
 
 #[cfg(test)]
-// TODO: really pub(crate)? maybe put something into testutil?
-pub(crate) mod tests {
+pub(crate) mod testutils {
+    use crate::mock_stream::MockStream;
+
+    use super::*;
+
+
+    pub(crate) fn assert_validation_error_client<F>(
+        run_command: F,
+        expected_synopsis: &'static str,
+        expected_argument: &'static str,
+        expected_char: char,
+    ) where
+        F: FnOnce(
+            Client<MockStream>,
+        ) -> std::result::Result<Session<MockStream>, (Error, Client<MockStream>)>,
+    {
+        let response = Vec::new();
+        let mock_stream = MockStream::new(response);
+        let client = Client::new(mock_stream);
+        assert_eq!(
+            run_command(client)
+                .expect_err("Error expected, but got success")
+                .0
+                .to_string(),
+            Error::Validate(ValidateError {
+                command_synopsis: expected_synopsis.to_owned(),
+                argument: expected_argument.to_string(),
+                offending_char: expected_char
+            })
+            .to_string()
+        );
+    }
+
+    pub(crate) fn assert_validation_error_session<F, R>(
+        run_command: F,
+        expected_synopsis: &'static str,
+        expected_argument: &'static str,
+        expected_char: char,
+    ) where
+        F: FnOnce(Session<MockStream>) -> Result<R>,
+    {
+        let response = Vec::new();
+        let mock_stream = MockStream::new(response);
+        let session = Session::new(Client::new(mock_stream).conn);
+        assert_eq!(
+            run_command(session)
+                .map(|_| ())
+                .expect_err("Error expected, but got success")
+                .to_string(),
+            Error::Validate(ValidateError {
+                command_synopsis: expected_synopsis.to_owned(),
+                argument: expected_argument.to_string(),
+                offending_char: expected_char
+            })
+            .to_string()
+        );
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
     use super::super::error::Result;
     use super::super::mock_stream::MockStream;
     use super::*;
     use imap_proto::types::*;
     use std::borrow::Cow;
 
+    use super::testutils::*;
+
     macro_rules! mock_session {
         ($s:expr) => {
             Session::new(Client::new($s).conn)
         };
     }
+
 
     #[test]
     fn read_response() {
@@ -1631,59 +1683,6 @@ pub(crate) mod tests {
         assert!(
             session.stream.get_ref().written_buf == command.as_bytes().to_vec(),
             "Invalid login command"
-        );
-    }
-
-    // TODO: move
-    fn assert_validation_error_client<F>(
-        run_command: F,
-        expected_synopsis: &'static str,
-        expected_argument: &'static str,
-        expected_char: char,
-    ) where
-        F: FnOnce(
-            Client<MockStream>,
-        ) -> std::result::Result<Session<MockStream>, (Error, Client<MockStream>)>,
-    {
-        let response = Vec::new();
-        let mock_stream = MockStream::new(response);
-        let client = Client::new(mock_stream);
-        assert_eq!(
-            run_command(client)
-                .expect_err("Error expected, but got success")
-                .0
-                .to_string(),
-            Error::Validate(ValidateError {
-                command_synopsis: expected_synopsis.to_owned(),
-                argument: expected_argument.to_string(),
-                offending_char: expected_char
-            })
-            .to_string()
-        );
-    }
-
-    pub(crate) fn assert_validation_error_session<F, R>(
-        run_command: F,
-        expected_synopsis: &'static str,
-        expected_argument: &'static str,
-        expected_char: char,
-    ) where
-        F: FnOnce(Session<MockStream>) -> Result<R>,
-    {
-        let response = Vec::new();
-        let mock_stream = MockStream::new(response);
-        let session = mock_session!(mock_stream);
-        assert_eq!(
-            run_command(session)
-                .map(|_| ())
-                .expect_err("Error expected, but got success")
-                .to_string(),
-            Error::Validate(ValidateError {
-                command_synopsis: expected_synopsis.to_owned(),
-                argument: expected_argument.to_string(),
-                offending_char: expected_char
-            })
-            .to_string()
         );
     }
 
@@ -2185,17 +2184,6 @@ pub(crate) mod tests {
         );
     }
 
-    // TODO: why isn't this checked?
-    // #[test]
-    // fn mv_validation_seq() {
-    //     assert_validation_error_session(
-    //         |mut session| session.mv("1:\n2", "MEETING"),
-    //         "MOVE seq mailbox",
-    //         "seq",
-    //         '\n',
-    //     )
-    // }
-
     #[test]
     fn mv_validation_query() {
         assert_validation_error_session(
@@ -2223,17 +2211,6 @@ pub(crate) mod tests {
             "Invalid uid move command"
         );
     }
-
-    // TODO: why isn't this checked?
-    // #[test]
-    // fn uid_mv_validation_seq() {
-    //     assert_validation_error_session(
-    //         |mut session| session.uid_mv("1:\n2", "MEETING"),
-    //         "UID MOVE seq mailbox",
-    //         "seq",
-    //         '\n',
-    //     )
-    // }
 
     #[test]
     fn uid_mv_validation_query() {
@@ -2312,6 +2289,16 @@ pub(crate) mod tests {
             |mut session| session.uid_fetch("1", "BODY[\n]"),
             "UID FETCH seq query",
             "query",
+            '\n',
+        )
+    }
+
+    #[test]
+    fn status_validation_mailbox() {
+        assert_validation_error_session(
+            |mut session| session.status("IN\nBOX", "(MESSAGES)"),
+            "STATUS mailbox dataitems",
+            "mailbox",
             '\n',
         )
     }

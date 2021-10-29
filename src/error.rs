@@ -254,11 +254,9 @@ impl StdError for ParseError {
 
 /// An [invalid character](https://tools.ietf.org/html/rfc3501#section-4.3) was found in a command
 /// argument.
-//TODO: check that all validation actually happens on commands
 #[derive(Debug)]
 pub struct ValidateError {
     /// the synopsis of the invalid command
-    //TODO: should be static str
     pub command_synopsis: String,
     /// the name of the invalid argument
     pub argument: String,
